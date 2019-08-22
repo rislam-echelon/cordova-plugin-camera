@@ -97,5 +97,13 @@ module.exports = {
         BACK: 0,
         /** Use the front-facing camera */
         FRONT: 1
+    },
+    /**
+     * Gallery upload modes, single or multiple
+     * @enum {number}
+     */
+    SelectionMode: {
+        SINGLE: 0,
+        MULTIPLE: 1
     }
 };

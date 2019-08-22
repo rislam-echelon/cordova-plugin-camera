@@ -48,6 +48,7 @@ import org.apache.cordova.PermissionHelper;
 import org.apache.cordova.PluginResult;
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -99,6 +100,9 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     public static final int TAKE_PIC_SEC = 0;
     public static final int SAVE_TO_ALBUM_SEC = 1;
 
+    public static final int SINGLE_SELECTION = 0;
+    public static final int MULTIPLE_SELECTION = 1;
+
     private static final String LOG_TAG = "CameraLauncher";
 
     //Where did this come from?
@@ -118,6 +122,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     private boolean correctOrientation;     // Should the pictures orientation be corrected
     private boolean orientationCorrected;   // Has the picture's orientation been corrected
     private boolean allowEdit;              // Should we allow the user to crop the image.
+    private int selectionStyle;             // Whether to allow single or multiple selection from the gallery
 
     protected final static String[] permissions = { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE };
 
@@ -168,6 +173,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             this.allowEdit = args.getBoolean(7);
             this.correctOrientation = args.getBoolean(8);
             this.saveToPhotoAlbum = args.getBoolean(9);
+            this.selectionStyle = args.getInt(12);
 
             // If the user specifies a 0 or smaller width/height
             // make it -1 so later comparisons succeed
@@ -372,6 +378,10 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         croppedUri = null;
         if (this.mediaType == PICTURE) {
             intent.setType("image/*");
+            // Check whether to allow multiple selections from the gallery
+            if(this.selectionStyle == MULTIPLE_SELECTION) {
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            }
             if (this.allowEdit) {
                 intent.setAction(Intent.ACTION_PICK);
                 intent.putExtra("crop", "true");
@@ -676,26 +686,70 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private void processResultFromGallery(int destType, Intent intent) {
         Uri uri = intent.getData();
-        if (uri == null) {
-            if (croppedUri != null) {
-                uri = croppedUri;
-            } else {
-                this.failPicture("null data from photo library");
-                return;
-            }
-        }
-        int rotate = 0;
 
+        // Check whether we are allowing multiple uploads or not
+        if(this.selectionStyle == MULTIPLE_SELECTION) {
+            // Create the array to return
+            JSONObject returnData = new JSONObject();
+            JSONArray uriList = new JSONArray();
+
+            // Check if one image was selected or multiple. A single selection would populate uri
+            // while a multiple upload would populate intent.getClipData()
+            if (uri == null) {
+                // Iterate the clip data to get all of the files
+                int count = intent.getClipData().getItemCount();
+                for(int i = 0; i < count; i++)
+                {
+                    Uri imageUri = intent.getClipData().getItemAt(i).getUri();
+                    uriList.put(getImageLocationFromGallery(imageUri));
+                }
+            }
+            else { // Single file
+                uriList.put(getImageLocationFromGallery(uri));
+            }
+
+            try {
+                returnData.put("list", uriList);
+            }
+            catch(Exception e)
+            {
+                this.failPicture("error getting all files selected");
+            }
+
+            // Return the object
+            this.callbackContext.success(returnData);
+        }
+        else { // Only a single file can be uploaded
+            if (uri == null) {
+                if (croppedUri != null) {
+                    uri = croppedUri;
+                } else {
+                    this.failPicture("null data from photo library");
+                    return;
+                }
+            }
+
+            // Get the file location and return in a string. This could be updated to return a single value array
+            // like the multi upload handler but to prevent breaking current implementations, this was left returned as a string
+            this.callbackContext.success(getImageLocationFromGallery(uri));
+        }
+    }
+
+    /**
+     * Gets the location of the file on the device with possible risizing being done
+     
+     * @param uri
+     * @return
+     */
+    private String getImageLocationFromGallery(Uri uri) {
         String fileLocation = FileHelper.getRealPath(uri, this.cordova);
-        LOG.d(LOG_TAG, "File location is: " + fileLocation);
 
         String uriString = uri.toString();
         String mimeType = FileHelper.getMimeType(uriString, this.cordova);
-
         // If you ask for video or the selected file doesn't have JPEG or PNG mime type
         //  there will be no attempt to resize any returned data
         if (this.mediaType == VIDEO || !(JPEG_MIME_TYPE.equalsIgnoreCase(mimeType) || PNG_MIME_TYPE.equalsIgnoreCase(mimeType))) {
-            this.callbackContext.success(fileLocation);
+            return fileLocation;
         }
         else {
 
@@ -705,7 +759,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                     (destType == FILE_URI || destType == NATIVE_URI) && !this.correctOrientation &&
                     mimeType != null && mimeType.equalsIgnoreCase(getMimetypeForFormat(encodingType)))
             {
-                this.callbackContext.success(uriString);
+                return uriString;
             } else {
                 Bitmap bitmap = null;
                 try {
@@ -716,7 +770,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 if (bitmap == null) {
                     LOG.d(LOG_TAG, "I either have a null image path or bitmap");
                     this.failPicture("Unable to create bitmap!");
-                    return;
+                    return null;
                 }
 
                 // If sending base64 image back
@@ -735,14 +789,14 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                             String modifiedPath = this.outputModifiedBitmap(bitmap, uri);
                             // The modified image is cached by the app in order to get around this and not have to delete you
                             // application cache I'm adding the current system time to the end of the file url.
-                            this.callbackContext.success("file://" + modifiedPath + "?" + System.currentTimeMillis());
+                            return "file://" + modifiedPath + "?" + System.currentTimeMillis();
 
                         } catch (Exception e) {
                             e.printStackTrace();
                             this.failPicture("Error retrieving image.");
                         }
                     } else {
-                        this.callbackContext.success(fileLocation);
+                        return fileLocation;
                     }
                 }
                 if (bitmap != null) {
@@ -752,6 +806,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 System.gc();
             }
         }
+        return null;
     }
 
     /**
