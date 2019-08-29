@@ -29,6 +29,7 @@
 #import <ImageIO/CGImageDestination.h>
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <objc/message.h>
+#import <Photos/Photos.h>
 
 #ifndef __CORDOVA_4_0_0
     #import <Cordova/NSData+Base64.h>
@@ -57,6 +58,236 @@ static NSString* toBase64(NSData* data) {
     }
 }
 
+@class ViewController;
+
+@protocol ViewControllerDelegate <NSObject>
+- (void)addItemViewController:(ViewController *)controller didFinishEnteringItem:(NSArray *)items;
+@end
+
+@interface ViewController : UIViewController<UICollectionViewDataSource,UICollectionViewDelegateFlowLayout, UIViewControllerTransitioningDelegate> {
+
+    NSMutableArray *photoImages;
+    PHFetchResult *assetsFetchResults;
+    PHCachingImageManager *imageManager;
+    UICollectionView *_collectionView;
+    @public id <ViewControllerDelegate> delegate;
+}
+@end
+
+@interface PhotoCollectionViewCell : UICollectionViewCell
+@end
+
+@implementation PhotoCollectionViewCell
+
+// Override the selected setter to update the highlight color
+- (void)setSelected:(BOOL)selected {
+    [super setSelected:selected];
+    
+    if (selected) {
+        self.layer.borderColor=[UIColor blueColor].CGColor;
+    } else {
+        self.layer.borderColor=[UIColor lightGrayColor].CGColor;
+    }
+}
+@end
+
+@implementation ViewController
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+    
+    // Get the available height and width (full width of parent and half the height)
+    CGFloat availableHeight = self.view.frame.size.height/2;
+    CGFloat availableWidth = self.view.frame.size.width;
+    
+    
+    self.view.backgroundColor = [UIColor colorWithWhite:1.0 alpha:.7];
+    self.view.layer.borderWidth=1.0f;
+    self.view.layer.borderColor=[UIColor darkGrayColor].CGColor;
+    self.view.frame = CGRectMake(0, availableHeight, availableWidth, availableHeight);
+    
+    PHFetchOptions *allPhotosOptions = [[PHFetchOptions alloc] init];
+    allPhotosOptions.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"creationDate" ascending:NO]];
+    PHFetchResult *allPhotos = [PHAsset fetchAssetsWithMediaType:PHAssetMediaTypeImage options:allPhotosOptions];
+    
+    photoImages = [[NSMutableArray alloc] init];
+    for(PHAsset *asset in allPhotos){
+        [photoImages addObject:asset];
+    }
+    
+    assetsFetchResults = [PHAsset fetchAssetsWithMediaType:PHAssetMediaTypeImage options:allPhotosOptions];
+    imageManager = [[PHCachingImageManager alloc] init];
+    
+    UICollectionViewFlowLayout *layout=[[UICollectionViewFlowLayout alloc] init];
+    [layout setScrollDirection:UICollectionViewScrollDirectionHorizontal];
+    _collectionView=[[UICollectionView alloc] initWithFrame:self.view.frame collectionViewLayout:layout];
+    [_collectionView setDataSource:self];
+    [_collectionView setDelegate:self];
+    _collectionView.allowsSelection = YES;
+    _collectionView.allowsMultipleSelection = YES;
+    
+    [_collectionView registerClass:[PhotoCollectionViewCell class] forCellWithReuseIdentifier:@"cellIdentifier"];
+    [_collectionView setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:.7]];
+    _collectionView.frame = CGRectMake(0, availableHeight + 50, availableWidth, availableHeight - 50);
+    
+    UINavigationBar* navigationbar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0, availableHeight, self.view.frame.size.width, 50)];
+    UINavigationItem* navigationItem = [[UINavigationItem alloc] initWithTitle:@"Choose Photos"];
+    
+    UIBarButtonItem *leftButton = [[UIBarButtonItem alloc] initWithTitle:@"Cancel" style:UIBarButtonItemStylePlain target:self action:@selector(dismiss:)];
+    navigationItem.leftBarButtonItem = leftButton;
+    
+    UIBarButtonItem *rightButton = [[UIBarButtonItem alloc] initWithTitle:@"Select" style:UIBarButtonItemStylePlain target:self action:@selector(closeImagePickerWithSelections:)];
+    navigationItem.rightBarButtonItem = rightButton;
+    
+    [navigationbar setItems:@[navigationItem]];
+    [self.view addSubview:navigationbar];
+    
+    //_collectionView.layer.position = CGPointMake(0, availableHeight/2 +32);
+    [self.view addSubview:_collectionView];
+}
+
+- (void)dismiss:(id)sender {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+-(void)closeImagePickerWithSelections:(id)sender
+{
+    // Create the array object to return
+    NSMutableArray *items = [NSMutableArray new];
+    // Check the selected items
+    for(UICollectionViewCell *cell in _collectionView.visibleCells)
+    {
+        NSIndexPath *indexPath = [_collectionView indexPathForCell:cell];
+        UICollectionViewCell *cell=[_collectionView dequeueReusableCellWithReuseIdentifier:@"cellIdentifier" forIndexPath:indexPath];
+        if([cell isSelected])
+        {
+            cell.layer.borderColor=[UIColor blueColor].CGColor;
+            // Get the cell image location
+            NSInteger index = (indexPath.section*2)+indexPath.row;
+            PHAsset *asset = [photoImages objectAtIndex:index];
+            
+            [items addObject:[self getAssetLocation:asset]];
+        }
+    }
+    
+    // Call the return handler before dismissing the view
+    [delegate addItemViewController:self didFinishEnteringItem:items];
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+-(NSString *)getAssetLocation:(PHAsset * )asset {
+    
+    PHImageManager *manager = [PHImageManager defaultManager];
+    PHImageRequestOptions *options = [PHImageRequestOptions new];
+    options.synchronous = YES;
+    options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
+    options.resizeMode = PHImageRequestOptionsResizeModeNone;
+    options.networkAccessAllowed = NO;
+    __block NSString *location;
+    [manager requestImageForAsset:asset targetSize:PHImageManagerMaximumSize contentMode:PHImageContentModeDefault options:options resultHandler:^(UIImage *resultImage, NSDictionary *info){
+        
+        NSURL *filePath = [info valueForKeyPath:@"PHImageFileURLKey"];
+        location = filePath.absoluteString;
+    }];
+    return location;
+}
+
+-(UIImage *)getAssetThumbnail:(PHAsset * )asset {
+    
+    PHImageRequestOptions *options = [[PHImageRequestOptions alloc]init];
+    options.synchronous = true;
+    
+    __block UIImage *image;
+    [PHCachingImageManager.defaultManager requestImageForAsset:asset targetSize:CGSizeMake(256, 256) contentMode:PHImageContentModeAspectFit options:options resultHandler:^(UIImage * _Nullable result, NSDictionary * _Nullable info) {
+        image = result;
+    }];
+    return image;
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout*)collectionViewLayout sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
+    return CGSizeMake(128, 128);
+}
+
+- (nonnull __kindof UICollectionViewCell *)collectionView:(nonnull UICollectionView *)collectionView cellForItemAtIndexPath:(nonnull NSIndexPath *)indexPath {
+    UICollectionViewCell *cell=[collectionView dequeueReusableCellWithReuseIdentifier:@"cellIdentifier" forIndexPath:indexPath];
+    
+    NSInteger index = (indexPath.section*2)+indexPath.row;
+    
+    PHAsset *asset = [photoImages objectAtIndex:index];
+    
+    UIImage *photoImage = [self getAssetThumbnail:asset];
+    UIImageView *imageView = [[UIImageView alloc] initWithImage:photoImage];
+    
+    // Keep image withing the cell bounds
+    imageView.frame = cell.contentView.bounds;
+    
+    [cell addSubview:imageView];
+    
+    cell.layer.borderWidth=2.0f;
+    
+    if([cell isSelected])
+    {
+        cell.layer.borderColor=[UIColor blueColor].CGColor;
+    }
+    else
+    {
+        cell.layer.borderColor=[UIColor lightGrayColor].CGColor;
+    }
+    
+    return cell;
+}
+
+- (NSInteger)collectionView:(nonnull UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
+    return [assetsFetchResults count];
+}
+
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath
+{
+}
+
+- (void)encodeWithCoder:(nonnull NSCoder *)aCoder {
+    
+}
+
+- (void)traitCollectionDidChange:(nullable UITraitCollection *)previousTraitCollection {
+    
+}
+
+- (void)preferredContentSizeDidChangeForChildContentContainer:(nonnull id<UIContentContainer>)container {
+    
+}
+
+- (void)systemLayoutFittingSizeDidChangeForChildContentContainer:(nonnull id<UIContentContainer>)container {
+    
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(nonnull id<UIViewControllerTransitionCoordinator>)coordinator {
+    
+}
+
+- (void)willTransitionToTraitCollection:(nonnull UITraitCollection *)newCollection withTransitionCoordinator:(nonnull id<UIViewControllerTransitionCoordinator>)coordinator {
+    
+}
+
+- (void)didUpdateFocusInContext:(nonnull UIFocusUpdateContext *)context withAnimationCoordinator:(nonnull UIFocusAnimationCoordinator *)coordinator {
+    
+}
+
+- (void)setNeedsFocusUpdate {
+    
+}
+
+- (BOOL)shouldUpdateFocusInContext:(nonnull UIFocusUpdateContext *)context {
+    
+}
+
+- (void)updateFocusIfNeeded {
+    
+}
+
+@end
+
 @implementation CDVPictureOptions
 
 + (instancetype) createFromTakePictureArguments:(CDVInvokedUrlCommand*)command
@@ -81,6 +312,7 @@ static NSString* toBase64(NSData* data) {
     pictureOptions.saveToPhotoAlbum = [[command argumentAtIndex:9 withDefault:@(NO)] boolValue];
     pictureOptions.popoverOptions = [command argumentAtIndex:10 withDefault:nil];
     pictureOptions.cameraDirection = [[command argumentAtIndex:11 withDefault:@(UIImagePickerControllerCameraDeviceRear)] unsignedIntegerValue];
+    pictureOptions.allowMultiSelect = [[command argumentAtIndex:12 withDefault:@(NO)] boolValue];
 
     pictureOptions.popoverSupported = NO;
     pictureOptions.usesGeolocation = NO;
@@ -91,7 +323,7 @@ static NSString* toBase64(NSData* data) {
 @end
 
 
-@interface CDVCamera ()
+@interface CDVCamera () <ViewControllerDelegate>
 
 @property (readwrite, assign) BOOL hasPendingOperation;
 
@@ -99,12 +331,22 @@ static NSString* toBase64(NSData* data) {
 
 @implementation CDVCamera
 
+NSString *multiSelectCallbackId;
+
 + (void)initialize
 {
     org_apache_cordova_validArrowDirections = [[NSSet alloc] initWithObjects:[NSNumber numberWithInt:UIPopoverArrowDirectionUp], [NSNumber numberWithInt:UIPopoverArrowDirectionDown], [NSNumber numberWithInt:UIPopoverArrowDirectionLeft], [NSNumber numberWithInt:UIPopoverArrowDirectionRight], [NSNumber numberWithInt:UIPopoverArrowDirectionAny], nil];
 }
 
 @synthesize hasPendingOperation, pickerController, locationManager;
+
+- (void)addItemViewController:(ViewController *)controller didFinishEnteringItem:(NSArray *)items
+{
+    // Create the json object to return. the uri list will be in a list property on the object
+    NSDictionary *dictionary = @{@"list": items};
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK  messageAsDictionary:dictionary];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:multiSelectCallbackId];
+}
 
 - (NSURL*) urlTransformer:(NSURL*)url
 {
@@ -174,11 +416,93 @@ static NSString* toBase64(NSData* data) {
                          [weakSelf.viewController presentViewController:alertController animated:YES completion:nil];
                      });
                  } else {
-                     [weakSelf showCameraPicker:command.callbackId withOptions:pictureOptions];
+                     // Check if multi select is allowed to decide which picker to show
+                     if([pictureOptions allowMultiSelect])
+                     {
+                         [weakSelf showCameraMultiPicker:command.callbackId withOptions:pictureOptions];
+                     }
+                     else
+                     {
+                         [weakSelf showCameraPicker:command.callbackId withOptions:pictureOptions];
+                     }
                  }
              }];
         } else {
-            [weakSelf showCameraPicker:command.callbackId withOptions:pictureOptions];
+            // Check if multi select is allowed to decide which picker to show
+            if([pictureOptions allowMultiSelect])
+            {
+                [weakSelf showCameraMultiPicker:command.callbackId withOptions:pictureOptions];
+            }
+            else
+            {
+                [weakSelf showCameraPicker:command.callbackId withOptions:pictureOptions];
+            }
+        }
+    }];
+}
+
+- (void)loadAlbums {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            NSArray *collectionsFetchResults;
+            
+            PHFetchResult *smartAlbums = [PHAssetCollection       fetchAssetCollectionsWithType:PHAssetCollectionTypeSmartAlbum
+                                                                                        subtype:PHAssetCollectionSubtypeAlbumRegular options:nil];
+            PHFetchResult *syncedAlbums = [PHAssetCollection fetchAssetCollectionsWithType:PHAssetCollectionTypeAlbum
+                                                                                   subtype:PHAssetCollectionSubtypeAlbumSyncedAlbum options:nil];
+            PHFetchResult *userCollections = [PHCollectionList fetchTopLevelUserCollectionsWithOptions:nil];
+            
+            // Add each PHFetchResult to the array
+            collectionsFetchResults = @[smartAlbums, userCollections, syncedAlbums];
+            
+            for (int i = 0; i < collectionsFetchResults.count; i ++) {
+                
+                PHFetchResult *fetchResult = collectionsFetchResults[i];
+                
+                for (int x = 0; x < fetchResult.count; x ++) {
+                    
+                    PHAssetCollection *collection = fetchResult[x];
+                    NSLog(@"COLLECTION");
+                }
+            }
+            
+           ViewController *viewController = [[ViewController alloc] init];
+            viewController.modalPresentationStyle = UIModalPresentationCustom;
+            viewController->delegate = self;
+            [self.viewController presentViewController:viewController animated:YES completion:^{
+                self.hasPendingOperation = NO;
+            }];
+            NSLog(@"END");
+        }
+    });
+}
+
+- (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source {
+    return [[UIPresentationController alloc] initWithPresentedViewController:presented presentingViewController:presenting];
+}
+
+- (CGRect)frameOfPresentedViewInContainerView {
+    CGRect presentedViewFrame = CGRectZero;
+    CGRect containerBounds = [[self.viewController view] bounds];
+    
+    presentedViewFrame.size = CGSizeMake(floorf(containerBounds.size.width / 2.0),
+                                         containerBounds.size.height);
+    presentedViewFrame.origin.x = containerBounds.size.width -
+    presentedViewFrame.size.width;
+    return presentedViewFrame;
+}
+
+- (void)showCameraMultiPicker:(NSString*)callbackId withOptions:(CDVPictureOptions *) pictureOptions
+{
+    CDVCameraPicker* cameraPicker = [CDVCameraPicker createFromPictureOptions:pictureOptions];
+    self.pickerController = cameraPicker;
+    
+    multiSelectCallbackId = callbackId;
+    [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
+        if (status == PHAuthorizationStatusAuthorized) {
+            [self loadAlbums];
+        } else {
+            NSLog(@"No Access");
         }
     }];
 }
@@ -771,3 +1095,4 @@ static NSString* toBase64(NSData* data) {
 }
 
 @end
+
