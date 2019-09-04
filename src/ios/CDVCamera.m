@@ -162,12 +162,11 @@ static NSString* toBase64(NSData* data) {
         UICollectionViewCell *cell=[_collectionView dequeueReusableCellWithReuseIdentifier:@"cellIdentifier" forIndexPath:indexPath];
         if([cell isSelected])
         {
-            cell.layer.borderColor=[UIColor blueColor].CGColor;
             // Get the cell image location
             NSInteger index = (indexPath.section*2)+indexPath.row;
             PHAsset *asset = [photoImages objectAtIndex:index];
             
-            [items addObject:[self getAssetLocation:asset]];
+            [items addObject:[self copyAndGetAssetLocation:asset]];
         }
     }
     
@@ -176,7 +175,8 @@ static NSString* toBase64(NSData* data) {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
--(NSString *)getAssetLocation:(PHAsset * )asset {
+-(NSString *)copyAndGetAssetLocation:(PHAsset * )asset {
+    NSString *tempPath = [[NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) lastObject] stringByAppendingString:@"/"];
     
     PHImageManager *manager = [PHImageManager defaultManager];
     PHImageRequestOptions *options = [PHImageRequestOptions new];
@@ -188,7 +188,24 @@ static NSString* toBase64(NSData* data) {
     [manager requestImageForAsset:asset targetSize:PHImageManagerMaximumSize contentMode:PHImageContentModeDefault options:options resultHandler:^(UIImage *resultImage, NSDictionary *info){
         
         NSURL *filePath = [info valueForKeyPath:@"PHImageFileURLKey"];
-        location = filePath.absoluteString;
+        NSString *fileLocation = [filePath.absoluteString stringByReplacingOccurrencesOfString:@"file://" withString:@""];
+        NSString *fileName = [[fileLocation componentsSeparatedByString:@"/"] lastObject];
+        location = [tempPath stringByAppendingString:fileName];
+        
+        NSError *error;
+        if([[NSFileManager defaultManager] fileExistsAtPath:location])
+        {
+            if(![[NSFileManager defaultManager] removeItemAtPath:location error:&error])
+            {
+                NSLog(@"%@", [error localizedDescription]);
+            }
+        }
+        
+        if(![[NSFileManager defaultManager] copyItemAtPath:fileLocation toPath:location error:&error])
+        {
+            NSLog(@"%@", [error localizedDescription]);
+            [UIImageJPEGRepresentation(resultImage, 1.0) writeToFile:location atomically:YES];
+        }
     }];
     return location;
 }
@@ -224,7 +241,7 @@ static NSString* toBase64(NSData* data) {
     
     [cell addSubview:imageView];
     
-    cell.layer.borderWidth=2.0f;
+    cell.layer.borderWidth=3.0f;
     
     if([cell isSelected])
     {
@@ -275,10 +292,6 @@ static NSString* toBase64(NSData* data) {
 }
 
 - (void)setNeedsFocusUpdate {
-    
-}
-
-- (BOOL)shouldUpdateFocusInContext:(nonnull UIFocusUpdateContext *)context {
     
 }
 
