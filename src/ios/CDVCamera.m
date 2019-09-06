@@ -71,6 +71,7 @@ static NSString* toBase64(NSData* data) {
     PHCachingImageManager *imageManager;
     UICollectionView *_collectionView;
     @public id <ViewControllerDelegate> delegate;
+    NSMutableSet *selectedPaths;
 }
 @end
 
@@ -96,6 +97,8 @@ static NSString* toBase64(NSData* data) {
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    
+    selectedPaths = [NSMutableSet set];
     
     // Get the available height and width (full width of parent and half the height)
     CGFloat availableHeight = self.view.frame.size.height/2;
@@ -155,19 +158,11 @@ static NSString* toBase64(NSData* data) {
 {
     // Create the array object to return
     NSMutableArray *items = [NSMutableArray new];
-    // Check the selected items
-    for(UICollectionViewCell *cell in _collectionView.visibleCells)
+    
+    // Loop through the selected items
+    for(PHAsset *asset in selectedPaths)
     {
-        NSIndexPath *indexPath = [_collectionView indexPathForCell:cell];
-        UICollectionViewCell *cell=[_collectionView dequeueReusableCellWithReuseIdentifier:@"cellIdentifier" forIndexPath:indexPath];
-        if([cell isSelected])
-        {
-            // Get the cell image location
-            NSInteger index = (indexPath.section*2)+indexPath.row;
-            PHAsset *asset = [photoImages objectAtIndex:index];
-            
-            [items addObject:[self copyAndGetAssetLocation:asset]];
-        }
+        [items addObject:[self copyAndGetAssetLocation:asset]];
     }
     
     // Call the return handler before dismissing the view
@@ -261,6 +256,20 @@ static NSString* toBase64(NSData* data) {
 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath
 {
+    // Add the selected item to the set
+    NSInteger index = (indexPath.section*2)+indexPath.row;
+    PHAsset *asset = [photoImages objectAtIndex:index];
+    
+    [selectedPaths addObject:asset];
+}
+
+- (void)collectionView:(UICollectionView *)collectionView didDeselectItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    // Add the selected item to the set
+    NSInteger index = (indexPath.section*2)+indexPath.row;
+    PHAsset *asset = [photoImages objectAtIndex:index];
+    
+    [selectedPaths removeObject:asset];
 }
 
 - (void)encodeWithCoder:(nonnull NSCoder *)aCoder {
