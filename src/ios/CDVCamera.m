@@ -162,7 +162,12 @@ static NSString* toBase64(NSData* data) {
     // Loop through the selected items
     for(PHAsset *asset in selectedPaths)
     {
-        [items addObject:[self copyAndGetAssetLocation:asset]];
+        NSString *currentLocation = [self copyAndGetAssetLocation:asset];
+        if (currentLocation != nil){
+            [items addObject:currentLocation];
+        }else{
+            NSLog(@"There was an issues copying a PHAsset and adding it to the seleceted items!");
+        }
     }
     
     // Call the return handler before dismissing the view
@@ -179,8 +184,10 @@ static NSString* toBase64(NSData* data) {
     options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
     options.resizeMode = PHImageRequestOptionsResizeModeNone;
     options.networkAccessAllowed = NO;
+    options.version = PHImageRequestOptionsVersionCurrent;
     __block NSString *location;
-    [manager requestImageForAsset:asset targetSize:PHImageManagerMaximumSize contentMode:PHImageContentModeDefault options:options resultHandler:^(UIImage *resultImage, NSDictionary *info){
+
+    [manager requestImageDataForAsset:asset options:options resultHandler:^(NSData * resultImageData, NSString *dataUTI, UIImageOrientation orientation, NSDictionary *info) {
         
         NSURL *filePath = [info valueForKeyPath:@"PHImageFileURLKey"];
         NSString *fileLocation = [filePath.absoluteString stringByReplacingOccurrencesOfString:@"file://" withString:@""];
@@ -196,11 +203,9 @@ static NSString* toBase64(NSData* data) {
             }
         }
         
-        if(![[NSFileManager defaultManager] copyItemAtPath:fileLocation toPath:location error:&error])
-        {
-            NSLog(@"%@", [error localizedDescription]);
-            [UIImageJPEGRepresentation(resultImage, 1.0) writeToFile:location atomically:YES];
-        }
+        UIImage* resultImage = [UIImage imageWithData:resultImageData];
+        [UIImageJPEGRepresentation(resultImage, 1.0) writeToFile:location atomically:YES];
+        
     }];
     return location;
 }
