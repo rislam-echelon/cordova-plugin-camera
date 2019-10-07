@@ -162,47 +162,47 @@ static NSString* toBase64(NSData* data) {
     // Loop through the selected items
     for(PHAsset *asset in selectedPaths)
     {
-        [items addObject:[self copyAndGetAssetLocation:asset]];
+        [self copyAndGetAssetLocation:asset assetLocations:items];
     }
     
-    // Call the return handler before dismissing the view
+    //This will wait until all the image paths are populated
+    while([items count] < [selectedPaths count]){
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+    }
+    
     [delegate addItemViewController:self didFinishEnteringItem:items];
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
--(NSString *)copyAndGetAssetLocation:(PHAsset * )asset {
+-(void) copyAndGetAssetLocation:(PHAsset * )asset assetLocations:(NSMutableArray *)assetLocations {
     NSString *tempPath = [[NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) lastObject] stringByAppendingString:@"/"];
     
-    PHImageManager *manager = [PHImageManager defaultManager];
-    PHImageRequestOptions *options = [PHImageRequestOptions new];
-    options.synchronous = YES;
-    options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
-    options.resizeMode = PHImageRequestOptionsResizeModeNone;
-    options.networkAccessAllowed = NO;
     __block NSString *location;
-    [manager requestImageForAsset:asset targetSize:PHImageManagerMaximumSize contentMode:PHImageContentModeDefault options:options resultHandler:^(UIImage *resultImage, NSDictionary *info){
+    
+    PHContentEditingInputRequestOptions *editingInputRequestOptions = [PHContentEditingInputRequestOptions new];
+    [asset requestContentEditingInputWithOptions:editingInputRequestOptions completionHandler:^(PHContentEditingInput * _Nullable contentEditingInput, NSDictionary * _Nonnull info) {
+      
+       NSURL *filePath = contentEditingInput.fullSizeImageURL;
+       NSString *fileLocation = [filePath.absoluteString stringByReplacingOccurrencesOfString:@"file://" withString:@""];
+       NSString *fileName = [[fileLocation componentsSeparatedByString:@"/"] lastObject];
+       location = [tempPath stringByAppendingString:fileName];
+       
+       NSError *error;
+       if([[NSFileManager defaultManager] fileExistsAtPath:location])
+       {
+           if(![[NSFileManager defaultManager] removeItemAtPath:location error:&error])
+           {
+               NSLog(@"%@", [error localizedDescription]);
+           }
+       }
+       
+       UIImage* resultImage = [UIImage imageWithContentsOfFile: fileLocation];
+       [UIImageJPEGRepresentation(resultImage, 1.0) writeToFile:location atomically:YES];
+       [assetLocations addObject:location];
         
-        NSURL *filePath = [info valueForKeyPath:@"PHImageFileURLKey"];
-        NSString *fileLocation = [filePath.absoluteString stringByReplacingOccurrencesOfString:@"file://" withString:@""];
-        NSString *fileName = [[fileLocation componentsSeparatedByString:@"/"] lastObject];
-        location = [tempPath stringByAppendingString:fileName];
-        
-        NSError *error;
-        if([[NSFileManager defaultManager] fileExistsAtPath:location])
-        {
-            if(![[NSFileManager defaultManager] removeItemAtPath:location error:&error])
-            {
-                NSLog(@"%@", [error localizedDescription]);
-            }
-        }
-        
-        if(![[NSFileManager defaultManager] copyItemAtPath:fileLocation toPath:location error:&error])
-        {
-            NSLog(@"%@", [error localizedDescription]);
-            [UIImageJPEGRepresentation(resultImage, 1.0) writeToFile:location atomically:YES];
-        }
     }];
-    return location;
+
+    return;
 }
 
 -(UIImage *)getAssetThumbnail:(PHAsset * )asset {
