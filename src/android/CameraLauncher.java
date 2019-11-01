@@ -158,7 +158,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             this.targetWidth = 0;
             this.encodingType = JPEG;
             this.mediaType = PICTURE;
-            this.mQuality = 50;
+            this.mQuality = 100; //Max Quality!
 
             //Take the values from the arguments if they're not already defined (this is tricky)
             this.destType = args.getInt(1);
@@ -479,7 +479,8 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private void processResultFromCamera(int destType, Intent intent) throws IOException {
         int rotate = 0;
-
+        this.correctOrientation = false;
+        this.mQuality = 100; //Max Quality
         // Create an ExifHelper to save the exif data that is lost during compression
         ExifHelper exif = new ExifHelper();
 
@@ -741,6 +742,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private String getImageLocationFromGallery(Uri uri) {
         String fileLocation = FileHelper.getRealPath(uri, this.cordova);
+        this.correctOrientation = false;
 
         String uriString = uri.toString();
         String mimeType = FileHelper.getMimeType(uriString, this.cordova);
