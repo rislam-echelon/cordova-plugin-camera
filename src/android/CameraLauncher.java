@@ -21,6 +21,7 @@ package org.apache.cordova.camera;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -420,56 +421,56 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
     }
 
 
-  /**
-   * Brings up the UI to perform crop on passed image URI
-   *
-   * @param picUri
-   */
-  private void performCrop(Uri picUri, int destType, Intent cameraIntent) {
-    try {
-        Intent cropIntent = new Intent("com.android.camera.action.CROP");
-        // indicate image type and Uri
-        cropIntent.setDataAndType(picUri, "image/*");
-        // set crop properties
-        cropIntent.putExtra("crop", "true");
+    /**
+     * Brings up the UI to perform crop on passed image URI
+     *
+     * @param picUri
+     */
+    private void performCrop(Uri picUri, int destType, Intent cameraIntent) {
+        try {
+            Intent cropIntent = new Intent("com.android.camera.action.CROP");
+            // indicate image type and Uri
+            cropIntent.setDataAndType(picUri, "image/*");
+            // set crop properties
+            cropIntent.putExtra("crop", "true");
 
 
-        // indicate output X and Y
-        if (targetWidth > 0) {
-          cropIntent.putExtra("outputX", targetWidth);
+            // indicate output X and Y
+            if (targetWidth > 0) {
+                cropIntent.putExtra("outputX", targetWidth);
+            }
+            if (targetHeight > 0) {
+                cropIntent.putExtra("outputY", targetHeight);
+            }
+            if (targetHeight > 0 && targetWidth > 0 && targetWidth == targetHeight) {
+                cropIntent.putExtra("aspectX", 1);
+                cropIntent.putExtra("aspectY", 1);
+            }
+            // create new file handle to get full resolution crop
+            croppedUri = Uri.fromFile(createCaptureFile(this.encodingType, System.currentTimeMillis() + ""));
+            cropIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            cropIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cropIntent.putExtra("output", croppedUri);
+
+
+            // start the activity - we handle returning in onActivityResult
+
+            if (this.cordova != null) {
+                this.cordova.startActivityForResult((CordovaPlugin) this,
+                        cropIntent, CROP_CAMERA + destType);
+            }
+        } catch (ActivityNotFoundException anfe) {
+            LOG.e(LOG_TAG, "Crop operation not supported on this device");
+            try {
+                processResultFromCamera(destType, cameraIntent);
+            }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+                LOG.e(LOG_TAG, "Unable to write to file");
+            }
         }
-        if (targetHeight > 0) {
-          cropIntent.putExtra("outputY", targetHeight);
-        }
-        if (targetHeight > 0 && targetWidth > 0 && targetWidth == targetHeight) {
-          cropIntent.putExtra("aspectX", 1);
-          cropIntent.putExtra("aspectY", 1);
-        }
-        // create new file handle to get full resolution crop
-        croppedUri = Uri.fromFile(createCaptureFile(this.encodingType, System.currentTimeMillis() + ""));
-        cropIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        cropIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-        cropIntent.putExtra("output", croppedUri);
-
-
-        // start the activity - we handle returning in onActivityResult
-
-        if (this.cordova != null) {
-            this.cordova.startActivityForResult((CordovaPlugin) this,
-                cropIntent, CROP_CAMERA + destType);
-        }
-    } catch (ActivityNotFoundException anfe) {
-      LOG.e(LOG_TAG, "Crop operation not supported on this device");
-      try {
-          processResultFromCamera(destType, cameraIntent);
-      }
-      catch (IOException e)
-      {
-          e.printStackTrace();
-          LOG.e(LOG_TAG, "Unable to write to file");
-      }
     }
-  }
 
     /**
      * Applies all needed transformation to the image received from the camera.
@@ -685,7 +686,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      */
     private void processResultFromGallery(int destType, Intent intent) {
         Uri uri = intent.getData();
-
+        ClipData clipData = intent.getClipData();
         // Check whether we are allowing multiple uploads or not
         if(this.selectionStyle == MULTIPLE_SELECTION) {
             // Create the array to return
@@ -694,12 +695,12 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
             // Check if one image was selected or multiple. A single selection would populate uri
             // while a multiple upload would populate intent.getClipData()
-            if (uri == null) {
+            if (clipData != null) {
                 // Iterate the clip data to get all of the files
-                int count = intent.getClipData().getItemCount();
+                int count = clipData.getItemCount();
                 for(int i = 0; i < count; i++)
                 {
-                    Uri imageUri = intent.getClipData().getItemAt(i).getUri();
+                    Uri imageUri = clipData.getItemAt(i).getUri();
                     uriList.put(getImageLocationFromGallery(imageUri));
                 }
             }
@@ -736,7 +737,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
     /**
      * Gets the location of the file on the device with possible risizing being done
-     
+
      * @param uri
      * @return
      */
@@ -1436,16 +1437,16 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
         this.callbackContext = callbackContext;
     }
 
-     /*
-      * This is dirty, but it does the job.
-      *
-      * Since the FilesProvider doesn't really provide you a way of getting a URL from the file,
-      * and since we actually need the Camera to create the file for us most of the time, we don't
-      * actually write the file, just generate the location based on a timestamp, we need to get it
-      * back from the Intent.
-      *
-      * However, the FilesProvider preserves the path, so we can at least write to it from here, since
-      * we own the context in this case.
+    /*
+     * This is dirty, but it does the job.
+     *
+     * Since the FilesProvider doesn't really provide you a way of getting a URL from the file,
+     * and since we actually need the Camera to create the file for us most of the time, we don't
+     * actually write the file, just generate the location based on a timestamp, we need to get it
+     * back from the Intent.
+     *
+     * However, the FilesProvider preserves the path, so we can at least write to it from here, since
+     * we own the context in this case.
      */
     private String getFileNameFromUri(Uri uri) {
         String fullUri = uri.toString();
